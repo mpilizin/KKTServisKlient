@@ -1,0 +1,75 @@
+name: Build KKTServisKlient
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Patch server & key into source
+        shell: pwsh
+        env:
+          RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
+          RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
+        run: |
+          $files = Get-ChildItem -Recurse -Filter "config.rs" | Where-Object { $_.FullName -like "*libs*" }
+          foreach ($f in $files) {
+            $content = Get-Content $f.FullName -Raw
+            $content = $content -replace '(pub const DEFAULT_RENDEZVOUS_SERVER\s*:\s*&str\s*=\s*)"[^"]*"', "`$1`"$env:RENDEZVOUS_SERVER`""
+            $content = $content -replace '(pub const DEFAULT_RS_PUB_KEY\s*:\s*&str\s*=\s*)"[^"]*"', "`$1`"$env:RS_PUB_KEY`""
+            Set-Content $f.FullName $content -Encoding UTF8
+          }
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install LLVM
+        run: choco install -y llvm --version=15.0.7
+
+      - name: Setup vcpkg & dependencies
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg $env:USERPROFILE\vcpkg
+          & $env:USERPROFILE\vcpkg\bootstrap-vcpkg.bat
+          echo "VCPKG_ROOT=$env:USERPROFILE\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & $env:USERPROFILE\vcpkg\vcpkg.exe install `
+            libvpx:x64-windows-static `
+            libyuv:x64-windows-static `
+            opus:x64-windows-static `
+            aom:x64-windows-static
+
+      - name: Download Sciter DLL
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path target\release | Out-Null
+          Invoke-WebRequest -Uri https://raw.githubusercontent.com/c-smile/sciter-sdk/master/bin.win/x64/sciter.dll -OutFile target\release\sciter.dll
+
+      - name: Build
+        shell: pwsh
+        env:
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+          VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Rename to KKTServisKlient.exe
+        shell: pwsh
+        run: |
+          Copy-Item target\x86_64-pc-windows-msvc\release\rustdesk.exe KKTServisKlient.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KKTServisKlient
+          path: |
+            KKTServisKlient.exe
+            target\release\sciter.dll
