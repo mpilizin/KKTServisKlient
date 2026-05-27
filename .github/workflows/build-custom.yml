@@ -32,8 +32,8 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Install LLVM
-        run: choco install -y llvm --version=15.0.7
+      - name: Set LLVM path
+        run: echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Setup vcpkg & dependencies
         shell: pwsh
